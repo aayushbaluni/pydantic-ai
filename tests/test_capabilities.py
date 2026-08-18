@@ -8094,13 +8094,9 @@ class TestXSearchCapability:
             )
 
         def outer_model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-            if len(messages) == 1:
-                return ModelResponse(
-                    parts=[ToolCallPart(tool_name='x_search', args='{"query": "test"}')],
-                    usage=RequestUsage(input_tokens=5, output_tokens=1),
-                )
+            # The run aborts inside the tool, so this is only ever asked once.
             return ModelResponse(
-                parts=[TextPart(content='done')],
+                parts=[ToolCallPart(tool_name='x_search', args='{"query": "test"}')],
                 usage=RequestUsage(input_tokens=5, output_tokens=1),
             )
 
@@ -8122,10 +8118,12 @@ class TestXSearchCapability:
 
         inner_requests = 0
 
-        def inner_model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        def inner_model_fn(  # pragma: no cover - the subagent must never be reached
+            messages: list[ModelMessage], info: AgentInfo
+        ) -> ModelResponse:
             nonlocal inner_requests
             inner_requests += 1
-            return ModelResponse(  # pragma: no cover
+            return ModelResponse(
                 parts=[TextPart(content='search results')],
                 usage=RequestUsage(input_tokens=1000),
             )
