@@ -8110,6 +8110,42 @@ class TestXSearchCapability:
         with pytest.raises(UsageLimitExceeded):
             await agent.run('search X', usage_limits=UsageLimits(total_tokens_limit=100))
 
+    async def test_x_search_subagent_is_bound_by_the_outer_request_limit(self):
+        """The outer run's limits bind the subagent before it spends.
+
+        Accruing usage alone is not enough: without the outer `UsageLimits`, the
+        subagent issues its (paid) request and is only caught once it returns.
+        With the limits propagated the request never happens.
+        See https://github.com/pydantic/pydantic-ai/issues/7147.
+        """
+        from pydantic_ai.common_tools.x_search import x_search_tool
+
+        inner_requests = 0
+
+        def inner_model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            nonlocal inner_requests
+            inner_requests += 1
+            return ModelResponse(  # pragma: no cover
+                parts=[TextPart(content='search results')],
+                usage=RequestUsage(input_tokens=1000),
+            )
+
+        def outer_model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name='x_search', args='{"query": "test"}')],
+                usage=RequestUsage(input_tokens=1),
+            )
+
+        tool = x_search_tool(FunctionModel(inner_model_fn), XSearchTool())
+        agent = Agent(FunctionModel(outer_model_fn), tools=[tool])
+
+        with pytest.raises(UsageLimitExceeded):
+            await agent.run('search X', usage_limits=UsageLimits(request_limit=1))
+
+        # The outer request consumed the budget, so the subagent must not have
+        # issued one at all. Without the limits propagated this is 1.
+        assert inner_requests == 0
+
     async def test_image_generation_subagent_usage_accrues_into_run_usage(self):
         """Same accrual for the image-generation subagent tool. See issue #7147."""
         from pydantic_ai.common_tools.image_generation import image_generation_tool
